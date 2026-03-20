@@ -5,6 +5,9 @@ langgraph>=0.1
 chromadb>=0.5
 tavily-python>=0.3
 pypdf>=4.0
+python-docx
 python-dotenv>=1.0
+streamlit
+watchdog
 pydantic>=2.0
 sentence-transformers>=3.0

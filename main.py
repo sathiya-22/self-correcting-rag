@@ -10,12 +10,15 @@ from __future__ import annotations
 
 import sys
 import os
+import time
+from typing import List, Optional
 from dotenv import load_dotenv
 
 # Load environment variables from .env before importing any LangChain/Gemini modules
 load_dotenv()
 
-from graph.graph import build_graph  # noqa: E402  (must be after load_dotenv)
+from langchain_core.messages import BaseMessage, HumanMessage, AIMessage  # noqa: E402
+from graph.graph import build_graph  # noqa: E402
 
 HINT_SIGNAL = "__HINT_REQUIRED__:"
 SEPARATOR = "─" * 60
@@ -23,14 +26,23 @@ SEPARATOR = "─" * 60
 
 def print_banner():
     print("\n" + SEPARATOR)
-    print("  🤖  Self-Correcting RAG  |  Powered by LangGraph + Gemini")
+    print("  🤖  Self-Correcting RAG  |  Conversational & Multi-Query")
     print(SEPARATOR + "\n")
 
 
-def run_pipeline(question: str, hint: str | None = None) -> str:
+def print_streaming(text: str, delay: float = 0.01):
+    """Prints text character-by-character for a streaming effect."""
+    for char in text:
+        sys.stdout.write(char)
+        sys.stdout.flush()
+        time.sleep(delay)
+    print()
+
+
+def run_pipeline(question: str, history: List[BaseMessage], hint: Optional[str] = None) -> dict:
     """
     Build the graph and stream a single question through it.
-    Returns the final generation string.
+    Returns the final state.
     """
     graph = build_graph()
 
@@ -41,15 +53,17 @@ def run_pipeline(question: str, hint: str | None = None) -> str:
         "retry_count": 0,
         "hint": hint,
         "source": "",
+        "history": history,
     }
 
     final_state = graph.invoke(initial_state)
-    return final_state.get("generation", "")
+    return final_state
 
 
 def interactive_loop():
-    """Run an interactive question-answer loop in the terminal."""
+    """Run an interactive conversational loop in the terminal."""
     print_banner()
+    history: List[BaseMessage] = []
 
     while True:
         try:
@@ -64,13 +78,12 @@ def interactive_loop():
             print("👋 Goodbye!")
             break
 
-        hint: str | None = None
-        attempts = 0
-
+        hint: Optional[str] = None
+        
         while True:
-            attempts += 1
             print(f"\n{SEPARATOR}")
-            generation = run_pipeline(question, hint=hint)
+            result = run_pipeline(question, history=history, hint=hint)
+            generation = result.get("generation", "")
 
             # Check if the system is requesting a hint
             if generation.startswith(HINT_SIGNAL):
@@ -83,17 +96,25 @@ def interactive_loop():
                     return
 
                 if not hint:
-                    print("⚠️  No hint provided. Skipping this question.")
+                    print("⚠️ No hint provided. Skipping this question.")
                     break
 
-                # Reset and try again with the hint baked in
+                # Retry with hint
                 print(f"\n🔄 Retrying with your hint...")
                 continue
 
             # Normal answer received
             print(f"\n📝 Answer:\n{SEPARATOR}")
-            print(generation)
+            print_streaming(generation)
             print(SEPARATOR + "\n")
+            
+            # Update history
+            history.append(HumanMessage(content=question))
+            history.append(AIMessage(content=generation))
+            
+            # Keep history manageable (last 10 messages = 5 exchanges)
+            if len(history) > 10:
+                history = history[-10:]
             break
 
 
@@ -110,17 +131,20 @@ def main():
         question = " ".join(sys.argv[1:])
         print_banner()
         print(f"❓ Question: {question}\n")
-        generation = run_pipeline(question)
+        
+        result = run_pipeline(question, history=[])
+        generation = result.get("generation", "")
 
         if generation.startswith(HINT_SIGNAL):
             print(f"💬 {generation[len(HINT_SIGNAL):]}")
         else:
             print(f"\n📝 Answer:\n{SEPARATOR}")
-            print(generation)
+            print_streaming(generation)
             print(SEPARATOR)
     else:
         interactive_loop()
 
 
 if __name__ == "__main__":
+    load_dotenv()
     main()
